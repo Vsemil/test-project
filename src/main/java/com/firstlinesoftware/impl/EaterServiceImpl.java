@@ -5,11 +5,8 @@ import com.firstlinesoftware.ICandy;
 import com.firstlinesoftware.ICandyEater;
 
 import java.util.Arrays;
-import java.util.Comparator;
-import java.util.List;
 import java.util.Set;
 import java.util.concurrent.*;
-import java.util.stream.Collectors;
 
 public class EaterServiceImpl extends CandyServiceBase {
 
@@ -22,29 +19,35 @@ public class EaterServiceImpl extends CandyServiceBase {
     public EaterServiceImpl(ICandyEater[] candyEaters) {
         super(candyEaters);
         executorService = Executors.newFixedThreadPool(candyEaters.length);
-        Comparator<ICandy> candyComparator = (candy1, candy2) -> {
-            if (candyTypesInUsing.contains(candy1.getCandyFlavour()) && candyTypesInUsing.contains(candy2.getCandyFlavour())) {
-                return 0;
-            } else if (candyTypesInUsing.contains(candy1.getCandyFlavour())) {
-                return 1;
-            } else if (candyTypesInUsing.contains(candy2.getCandyFlavour())) {
-                return -1;
+        queue = new LinkedBlockingDeque<>();
+        Arrays.stream(candyEaters).forEach(ce -> executorService.submit(() ->{
+            while (true) {
+                try {
+                    final ICandy candy = queue.take();
+                    final boolean canEat;
+                    synchronized (candyTypesInUsing) {
+                        if (!candyTypesInUsing.contains(candy.getCandyFlavour())) {
+                            candyTypesInUsing.add(candy.getCandyFlavour());
+                            canEat = true;
+                        } else {
+                            canEat = false;
+                        }
+                    }
+                    if (canEat) {
+                        ce.eat(candy);
+                        candyTypesInUsing.remove(candy.getCandyFlavour());
+                    } else {
+                        queue.put(candy);
+                    }
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
             }
-            return 0;
-        };
-        queue = new PriorityBlockingQueue<>(10, candyComparator);
-        List<CustomCandyEater> eaterList = Arrays.stream(candyEaters)
-                .map(ce -> new CustomCandyEater(ce, queue, candyTypesInUsing))
-                .collect(Collectors.toList());
-        eaterList.forEach(ce -> executorService.submit(ce::listen));
+        }));
     }
 
     @Override
     public void addCandy(ICandy candy) {
-        try {
-            queue.put(candy);
-        } catch (InterruptedException e) {
-            throw new RuntimeException();
-        }
+        queue.add(candy);
     }
 }
